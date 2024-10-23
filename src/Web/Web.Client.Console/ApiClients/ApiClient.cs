@@ -15,7 +15,6 @@ internal sealed class ApiClient : IApiClient
     public ApiClient(IHttpClientFactory httpClientFactory)
     {
         httpClient = httpClientFactory.CreateClient();
-        httpClient.BaseAddress = ;
     }
 
     public async Task<AccountResponse> FetchAccountData(AccountRequest request)

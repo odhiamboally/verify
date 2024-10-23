@@ -7,10 +7,14 @@ using System.Numerics;
 using System.Text;
 using System.Threading.Tasks;
 
+using Microsoft.Extensions.Configuration;
+
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 
 using Polly;
+
+using Quartz.Util;
 
 using Refit;
 
@@ -29,36 +33,24 @@ internal sealed class NodeManagementService : INodeManagementService
     private readonly HttpClient httpClient;
     private readonly IHashingService hashingService;
     private readonly IDHTRedisService dhtRedisService;
+    private readonly IConfiguration configuration;
     private const int BucketSize = 20;
 
 
     public NodeManagementService(
         IHttpClientFactory httpClientFactory,
         IHashingService HashingService, 
-        IDHTRedisService DHTRedisService)
+        IDHTRedisService DHTRedisService,
+        IConfiguration Configuration)
     {
         httpClient = httpClientFactory.CreateClient();
         httpClient.Timeout = TimeSpan.FromSeconds(100);
         hashingService = HashingService;
         dhtRedisService = DHTRedisService;
+        configuration = Configuration;
         
     }
 
-
-    public async Task<DHTResponse<bool>> NodeExistsInDHTNetwork(byte[] bicHash)
-    {
-        try
-        {
-            // Check if the node with this BIC hash exists in the DHT (in this case Redis).
-            return await dhtRedisService.NodeExists(bicHash);
-
-        }
-        catch (Exception)
-        {
-
-            throw;
-        }
-    }
 
     public async Task<DHTResponse<NodeInfo>> RegisterOrUpdateNodeAsync(AddNodeRequest addNodeRequest)
     {
@@ -74,7 +66,7 @@ internal sealed class NodeManagementService : INodeManagementService
 
             };
 
-            var nodeExists = await NodeExistsInDHTNetwork(nodeHashResponse.Data!);
+            var nodeExists = await dhtRedisService.NodeExistsAsync("dht:nodes", nodeHashResponse.Data!);
             if (nodeExists.Data)
             {
                 // Update node's information
@@ -111,7 +103,7 @@ internal sealed class NodeManagementService : INodeManagementService
     {
         try
         {
-            return await dhtRedisService.GetNodeDetails(bicHash);
+            return await dhtRedisService.GetNodeAsync("dht:nodes", bicHash);
         }
         catch (Exception)
         {
@@ -120,12 +112,12 @@ internal sealed class NodeManagementService : INodeManagementService
         }
     }
 
-    public async Task<DHTResponse<string>> GetNodeEndpointAsync(byte[] hashedAccount)
+    public async Task<DHTResponse<string>> GetNodeEndpointAsync(byte[] accountHash)
     {
         try
         {
             // Use the hashed account to retrieve the bank node info from Redis
-            var dhtResponse = await dhtRedisService.GetNodeAsync("dht:nodes", hashedAccount);
+            var dhtResponse = await dhtRedisService.GetNodeAsync("dht:nodes", accountHash);
 
             if (dhtResponse.Successful)
             {
@@ -145,11 +137,31 @@ internal sealed class NodeManagementService : INodeManagementService
         }
     }
 
+    public async Task<DHTResponse<string>> GetNodeEndpointFromConfigAsync(byte[] bicHash)
+    {
+        try
+        {
+            var bicHashString = Convert.ToBase64String(bicHash);
+            var nodeEnpoint = configuration[$"NodeConfig:{bicHashString}"];
+            if (!String.IsNullOrWhiteSpace(nodeEnpoint))
+            {
+                return DHTResponse<string>.Success("Success", nodeEnpoint!);
+            }
+
+            return DHTResponse<string>.Success("Failed", string.Empty);
+        }
+        catch (Exception)
+        {
+
+            throw;
+        }
+    }
+
     public async Task<DHTResponse<List<NodeInfo>>> GetAllNodesAsync()
     {
         try
         {
-            return await dhtRedisService.GetAllNodesAsync();
+            return await dhtRedisService.GetAllNodesAsync("dht:nodes");
 
         }
         catch (Exception)
@@ -199,7 +211,7 @@ internal sealed class NodeManagementService : INodeManagementService
                 };
 
                 // Update in Redis
-                await dhtRedisService.SetNodeAsync(redisNodesKey, nodeInfo.NodeHash, existingNode, TimeSpan.FromHours(24));
+                await dhtRedisService.SetNodeAsync(redisNodesKey, nodeInfo.NodeHash, JsonConvert.SerializeObject(existingNode), TimeSpan.FromHours(24));
                 return DHTResponse<NodeInfo>.Success("Node updated in DHT", existingNode);
             }
             else
@@ -216,15 +228,14 @@ internal sealed class NodeManagementService : INodeManagementService
                 else
                 {
                     // Bucket is full, implement eviction logic
-                    var leastRecentlySeenNodeBIC = await dhtRedisService.GetLeastRecentlySeenNodeHash(redisBucketsKey);
-                    var leastRecentlySeenNode = await dhtRedisService.GetLeastRecentlySeenNode(redisBucketsKey, redisNodesKey);
+                    var leastRecentlySeenNode = await dhtRedisService.GetLeastRecentlySeenNodeAsync(redisBucketsKey, redisNodesKey);
 
                     // Check reachability (example: ping)
                     var isReachable = await PingNodeAsync(leastRecentlySeenNode.Data!);
                     if (!isReachable.Data)
                     {
                         // Replace least recently seen node
-                        await dhtRedisService.RemoveValueAsync(redisNodesKey, leastRecentlySeenNodeBIC.Data!);
+                        await dhtRedisService.RemoveValueAsync(redisNodesKey, leastRecentlySeenNode.Data!.NodeHash);
                         await dhtRedisService.SetSortedNodeAsync(redisBucketsKey, redisNodesKey, nodeInfo, distance);
 
                         return DHTResponse<NodeInfo>.Success("Replaced least recently seen node in DHT", nodeInfo);
@@ -298,7 +309,7 @@ internal sealed class NodeManagementService : INodeManagementService
         }
     }
 
-    public async Task<DHTResponse<NodeInfo>> AddOrUpdateNodeAsync(NodeInfo nodeInfo, bool withEviction = true)
+    public async Task<DHTResponse<bool>> AddOrUpdateNodeAsync(NodeInfo nodeInfo, bool withEviction = true)
     {
         try
         {
@@ -309,18 +320,16 @@ internal sealed class NodeManagementService : INodeManagementService
             string redisNodesKey = $"dht:nodes";
 
             // Fetch existing node from Redis or in-memory
-            var existingNodeJson = await dhtRedisService.GetNodeAsync(redisNodesKey, nodeInfo.NodeHash);
-
-            if (existingNodeJson?.Data != null)
+            var existingNodeResponse = await dhtRedisService.GetNodeAsync(redisNodesKey, nodeInfo.NodeHash);
+            if (existingNodeResponse?.Data != null)
             {
                 // Node exists, update its info
-                var updatedNode = UpdateNodeInfo(existingNodeJson.Data!, nodeInfo);
-                await dhtRedisService.SetNodeAsync(redisNodesKey, nodeInfo.NodeHash, updatedNode, TimeSpan.FromHours(24));
-                return DHTResponse<NodeInfo>.Success("Node updated successfully", updatedNode);
+                var updatedNode = UpdateNodeInfo(existingNodeResponse.Data!, nodeInfo);
+                await dhtRedisService.SetNodeAsync(redisNodesKey, nodeInfo.NodeHash, JsonConvert.SerializeObject(updatedNode), TimeSpan.FromHours(24));
+                return DHTResponse<bool>.Success("Node updated successfully", true, null, new Dictionary<string, object>() { { "node", updatedNode } });
             }
             else
             {
-                // Node doesn't exist, add it if there's space, or handle eviction
                 return await HandleNodeAdditionWithEvictionAsync(redisBucketsKey, redisNodesKey, nodeInfo, distance, withEviction);
             }
         }
@@ -402,41 +411,6 @@ internal sealed class NodeManagementService : INodeManagementService
         }
     }
 
-    public async Task<DHTResponse<NodeInfo>> RemoveNodeFromBucketAsync(NodeInfo nodeInfo)
-    {
-        try
-        {
-            // Locate the bucket and remove the node from the bucket
-            var currentNodeHash = await hashingService.ByteHash(nodeInfo.NodeBIC);
-            int distance = DHTUtilities.CalculateXorDistance(currentNodeHash.Data!, nodeInfo.NodeHash);
-
-            if (buckets.TryGetValue(distance, out var bucket))
-            {
-                bucket.Remove(nodeInfo);
-                return await Task.FromResult(DHTResponse<NodeInfo>.Success(
-                    "",
-                    new NodeInfo
-                    {
-                        NodeBIC = nodeInfo.NodeBIC,
-                        NodeUri = nodeInfo.NodeUri,
-                        NodeHash = nodeInfo.NodeHash,
-                        NodeEndPoint = nodeInfo.NodeEndPoint,
-                        KnownPeers = nodeInfo.KnownPeers,
-
-                    }));
-            }
-
-            return await Task.FromResult(DHTResponse<NodeInfo>.Failure(
-                    "Failed",
-                    null));
-
-        }
-        catch (Exception)
-        {
-
-            throw;
-        }
-    }
 
 
     #region Private Methods
@@ -455,7 +429,7 @@ internal sealed class NodeManagementService : INodeManagementService
             };
 
             // Store node info in Redis
-            await dhtRedisService.SetNodeAsync("dht:buckets", nodeHash, nodeInfo, TimeSpan.FromHours(24));
+            await dhtRedisService.SetNodeAsync("dht:buckets", nodeHash, JsonConvert.SerializeObject(nodeInfo), TimeSpan.FromHours(24));
 
         }
         catch (Exception)
@@ -469,7 +443,7 @@ internal sealed class NodeManagementService : INodeManagementService
     {
         if (storageType == StorageType.Redis)
         {
-            await dhtRedisService.SetNodeAsync(redisNodeKey, nodeInfo.NodeHash, nodeInfo, TimeSpan.FromHours(24));
+            await dhtRedisService.SetNodeAsync(redisNodeKey, nodeInfo.NodeHash, JsonConvert.SerializeObject(nodeInfo), TimeSpan.FromHours(24));
         }
         else
         {
@@ -531,12 +505,8 @@ internal sealed class NodeManagementService : INodeManagementService
     {
         try
         {
-            var leastRecentlySeenNodeBIC = storageType == StorageType.Redis
-            ? await dhtRedisService.GetLeastRecentlySeenNodeHash(redisBucketsKey)
-            : DHTResponse<string>.Success("", string.Empty);
-
             var leastRecentlySeenNode = storageType == StorageType.Redis
-                ? await dhtRedisService.GetLeastRecentlySeenNode(redisBucketsKey, redisNodesKey)
+                ? await dhtRedisService.GetLeastRecentlySeenNodeAsync(redisBucketsKey, redisNodesKey)
                 : DHTResponse<NodeInfo>.Success("", null!);
 
             // Check reachability
@@ -546,7 +516,7 @@ internal sealed class NodeManagementService : INodeManagementService
                 // Replace the unreachable node
                 if (storageType == StorageType.Redis)
                 {
-                    await dhtRedisService.RemoveValueAsync(redisNodesKey, leastRecentlySeenNodeBIC.Data!);
+                    await dhtRedisService.RemoveValueAsync(redisNodesKey, leastRecentlySeenNode.Data!.NodeHash!);
                 }
 
                 //RemoveNodeFromMemoryBucket(redisKey, leastRecentlySeenNode.Data!);
@@ -565,15 +535,15 @@ internal sealed class NodeManagementService : INodeManagementService
         
     }
 
-    private async Task<DHTResponse<NodeInfo>> HandleNodeAdditionWithEvictionAsync(string redisBucketsKey, string redisNodesKey, NodeInfo nodeInfo, int distance, bool withEviction)
+    private async Task<DHTResponse<bool>> HandleNodeAdditionWithEvictionAsync(string redisBucketsKey, string redisNodesKey, NodeInfo nodeInfo, int distance, bool withEviction)
     {
         // Check bucket size for the XOR distance bucket
         var bucketCount = await dhtRedisService.GetBucketCountAsync(redisBucketsKey, StorageType.Redis);
         if (bucketCount.Data < BucketSize)
         {
             // Bucket has space, add the new node
-            await dhtRedisService.SetSortedNodeAsync(redisBucketsKey, redisNodesKey, nodeInfo, distance);
-            return DHTResponse<NodeInfo>.Success("Node added to DHT", nodeInfo);
+            return await dhtRedisService.SetSortedNodeAsync(redisBucketsKey, redisNodesKey, nodeInfo, distance);
+                
         }
         else if (withEviction)
         {
@@ -582,39 +552,28 @@ internal sealed class NodeManagementService : INodeManagementService
         }
         else
         {
-            return DHTResponse<NodeInfo>.Failure("Bucket is full, and eviction is disabled.");
+            return DHTResponse<bool>.Failure("Bucket is full, and eviction is disabled.");
         }
     }
 
-    private async Task<DHTResponse<NodeInfo>> EvictAndReplaceNode(string redisBucketsKey, string redisNodesKey, NodeInfo newNode, int distance)
+    private async Task<DHTResponse<bool>> EvictAndReplaceNode(string redisBucketsKey, string redisNodesKey, NodeInfo newNode, int distance)
     {
         // Get least recently seen node for eviction
-        var leastRecentlySeenNodeBIC = await dhtRedisService.GetLeastRecentlySeenNodeHash(redisBucketsKey);
-        var leastRecentlySeenNode = await dhtRedisService.GetLeastRecentlySeenNode(redisBucketsKey, redisNodesKey);
+        var leastRecentlySeenNode = await dhtRedisService.GetLeastRecentlySeenNodeAsync(redisBucketsKey, redisNodesKey);
 
         // Check reachability (ping) for eviction,
-        bool isReachable = await PingNodeWithRetryAsync(leastRecentlySeenNode.Data!);
-        if (!isReachable)
+        var isReachable = await PingNodeAsync(leastRecentlySeenNode.Data!);
+        if (!isReachable.Data)
         {
             // Replace least recently seen node
-            await dhtRedisService.RemoveValueAsync(redisNodesKey, leastRecentlySeenNodeBIC.Data!);
+            await dhtRedisService.RemoveValueAsync(redisNodesKey, leastRecentlySeenNode.Data.NodeHash);
             await dhtRedisService.SetSortedNodeAsync(redisBucketsKey, redisNodesKey, newNode, distance);
-            return DHTResponse<NodeInfo>.Success("Replaced least recently seen node", newNode);
+            return DHTResponse<bool>.Success("Replaced least recently seen node", true, null, new Dictionary<string, object>() { { "node", newNode } });
         }
         else
         {
-            return DHTResponse<NodeInfo>.Failure("Bucket is full, and all nodes are reachable.");
+            return DHTResponse<bool>.Failure("Bucket is full, and all nodes are reachable.");
         }
-    }
-
-    private async Task<bool> PingNodeWithRetryAsync(NodeInfo node, int maxRetries = 3)
-    {
-        for (int i = 0; i < maxRetries; i++)
-        {
-            var isReachableResponse = await PingNodeAsync(node);
-            if (isReachableResponse.Data) return true;
-        }
-        return false;
     }
 
     private bool ShouldReplaceNode(NodeInfo leastRecentlySeenNode, NodeInfo newNode)
