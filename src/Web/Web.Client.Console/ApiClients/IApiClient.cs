@@ -4,7 +4,10 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
+using Web.Client.Console.Dtos;
+
 namespace Web.Client.Console.ApiClients;
-internal interface IApiClient
+public interface IApiClient
 {
+    Task<AccountResponse> FetchAccountData(AccountRequest request);
 }

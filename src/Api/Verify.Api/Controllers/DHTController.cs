@@ -24,7 +24,7 @@ public class DHTController : ControllerBase
         serviceManager = ServiceManager;
     }
 
-    [HttpGet("fetchaccountdata")]
+    [HttpGet("fetchaccountinfo")]
     public async Task<ActionResult<DHTResponse<AccountInfo>>> FetchAccountData([FromBody] AccountRequest fetchAccountRequest)
     {
         var validator = new AccountRequestValidator();

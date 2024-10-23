@@ -10,6 +10,8 @@ using System.Threading.Tasks;
 
 using Newtonsoft.Json;
 
+using Refit;
+
 using StackExchange.Redis;
 
 using Verify.Application.Abstractions.DHT;
@@ -260,18 +262,33 @@ internal sealed class DHTService : IDHTService
     {
         try
         {
+            if (string.IsNullOrWhiteSpace(bankBaseUrl))
+            {
+                return DHTResponse<AccountInfo>.Failure("Bank base URL is invalid.");
+            }
+
             // Create a Refit client for the specified bank
             var bankApiClient = apiClientFactory.CreateClient(bankBaseUrl);
+            var accountDetailsResponse = await bankApiClient.FetchAccountData(accountRequest);
 
-            // Send request to the specified bank and return the result
-            var accountDetails = await bankApiClient.FetchAccountData(accountRequest);
-
-            return accountDetails;
+            return accountDetailsResponse.Successful && accountDetailsResponse.Data != null
+                ? DHTResponse<AccountInfo>.Success("Account data retrieved successfully", accountDetailsResponse.Data)
+                : DHTResponse<AccountInfo>.Failure("Account data could not be retrieved.");
         }
-        catch (Exception)
+        catch (ApiException apiEx)
         {
-
-            throw;
+            // Capture specific HTTP errors
+            return DHTResponse<AccountInfo>.Failure($"API error occurred: {apiEx.StatusCode}, Message: {apiEx.Content}");
+        }
+        catch (HttpRequestException httpEx)
+        {
+            // Handle network issues (e.g., connection failure, timeouts)
+            return DHTResponse<AccountInfo>.Failure($"Network error occurred: {httpEx.Message}");
+        }
+        catch (Exception ex)
+        {
+            // Catch other exceptions
+            return DHTResponse<AccountInfo>.Failure($"An error occurred: {ex.Message}");
         }
     }
 

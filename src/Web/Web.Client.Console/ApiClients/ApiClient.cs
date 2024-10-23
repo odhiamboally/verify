@@ -19,7 +19,19 @@ internal sealed class ApiClient : IApiClient
 
     public async Task<AccountResponse> FetchAccountData(AccountRequest request)
     {
-        return await httpClient.PostAsJsonAsync();
+        try
+        {
+            var apiUrl = "api/dht/fetchaccountinfo"; 
+            var apiResponse = await httpClient.PostAsJsonAsync(apiUrl, request);
+            apiResponse.EnsureSuccessStatusCode();
+            var accountResponse = await apiResponse.Content.ReadFromJsonAsync<AccountResponse>();
+            return accountResponse!;
+        }
+        catch (Exception)
+        {
+
+            throw;
+        }
     }
 
 }

@@ -26,11 +26,15 @@ internal sealed class ApiClientFactory : IApiClientFactory
                 throw new ArgumentException("Bank base URL cannot be null or empty", nameof(nodeBaseUrl));
             }
 
-            // Create and return a Refit client dynamically
-            return RestService.For<IApiClient>(new HttpClient
+            // Create and configure an HttpClient with timeout, etc.
+            var httpClient = new HttpClient
             {
-                BaseAddress = new Uri(nodeBaseUrl)
-            }, refitSettings);
+                BaseAddress = new Uri(nodeBaseUrl),
+                Timeout = TimeSpan.FromSeconds(100)  // You can adjust the timeout as necessary
+            };
+
+            // Create and return a Refit client dynamically
+            return RestService.For<IApiClient>(httpClient, refitSettings);
         }
         catch (Exception)
         {
