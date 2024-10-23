@@ -6,26 +6,34 @@ using System.Net.Http.Json;
 using System.Text;
 using System.Threading.Tasks;
 
+using Microsoft.Extensions.Configuration;
+
 using Web.Client.Console.Dtos;
 
 namespace Web.Client.Console.ApiClients;
 internal sealed class ApiClient : IApiClient
 {
     private readonly HttpClient httpClient;
-    public ApiClient(IHttpClientFactory httpClientFactory)
+    private readonly IConfiguration configuration;
+    public ApiClient(IHttpClientFactory httpClientFactory, IConfiguration Configuration)
     {
-        httpClient = httpClientFactory.CreateClient();
+        configuration = Configuration;
+        httpClient = httpClientFactory.CreateClient("DHT");
     }
 
-    public async Task<AccountResponse> FetchAccountData(AccountRequest request)
+    public async Task<AccountInfo> FetchAccountData(AccountRequest request)
     {
         try
         {
             var apiUrl = "api/dht/fetchaccountinfo"; 
             var apiResponse = await httpClient.PostAsJsonAsync(apiUrl, request);
+            if (!apiResponse.IsSuccessStatusCode)
+            {
+
+            }
             apiResponse.EnsureSuccessStatusCode();
-            var accountResponse = await apiResponse.Content.ReadFromJsonAsync<AccountResponse>();
-            return accountResponse!;
+            var accountInfoResponse = await apiResponse.Content.ReadFromJsonAsync<AccountInfo>();
+            return accountInfoResponse!;
         }
         catch (Exception)
         {

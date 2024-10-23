@@ -24,8 +24,8 @@ public class DHTController : ControllerBase
         serviceManager = ServiceManager;
     }
 
-    [HttpGet("fetchaccountinfo")]
-    public async Task<ActionResult<DHTResponse<AccountInfo>>> FetchAccountData([FromBody] AccountRequest fetchAccountRequest)
+    [HttpPost("fetchaccountinfo")]
+    public async Task<ActionResult<AccountInfo>> FetchAccountData([FromBody] AccountRequest fetchAccountRequest)
     {
         var validator = new AccountRequestValidator();
         if (!validator.Validate(fetchAccountRequest).IsValid)
@@ -45,7 +45,7 @@ public class DHTController : ControllerBase
         if (serviceResponse.Data == null)
             return NoContent();
 
-        return Ok(serviceResponse);
+        return Ok(serviceResponse.Data);
     }
 
    

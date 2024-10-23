@@ -52,12 +52,7 @@ public static class DependencyInjection
             var ConnString = configuration.GetConnectionString("KHS");
             services.AddDbContext<DBContext>(options => options.UseSqlServer(ConnString!));
 
-            services.AddScoped<IServiceManager, ServiceManager>();
-            services.AddScoped<IAccountService, AccountService>();
-            services.AddScoped<ILogService, LogService>();
-            services.AddScoped<IDHTService, DHTService>();
-            services.AddScoped<IHashingService, HashingService>();
-            //services.AddScoped<INodeHealthCheckService, NodeHealthCheckService>();
+            
 
             var refitSettings = new RefitSettings(); // Customize if needed
             services.AddSingleton<IApiClientFactory>(new ApiClientFactory(refitSettings));
@@ -107,30 +102,44 @@ public static class DependencyInjection
             });
 
             // Register Quartz services
-            services.AddQuartz(q =>
-            {
-                // Schedule the NodeHealthCheckJob to run every 5 minutes
-                //q.UseMicrosoftDependencyInjectionJobFactory();
+            //services.AddQuartz(q =>
+            //{
+            //    // Schedule the NodeHealthCheckJob to run every 5 minutes
+            //    //q.UseMicrosoftDependencyInjectionJobFactory();
 
-                var jobKey = new JobKey("NodeHealthCheckService");
+            //    var jobKey = new JobKey("NodeHealthCheckService");
 
-                q.AddTrigger(opts => opts
-                    .ForJob(jobKey)
-                    .WithIdentity("NodeHealthCheckJob-trigger")
-                    .WithSimpleSchedule(x => x
-                        .WithInterval(TimeSpan.FromMinutes(5))
-                        .RepeatForever())
-                );
-            });
+            //    q.AddTrigger(opts => opts
+            //        .ForJob(jobKey)
+            //        .WithIdentity("NodeHealthCheckJob-trigger")
+            //        .WithSimpleSchedule(x => x
+            //            .WithInterval(TimeSpan.FromMinutes(5))
+            //            .RepeatForever())
+            //    );
+            //});
 
             // Add the Quartz hosted service
-            services.AddQuartzHostedService(q => q.WaitForJobsToComplete = true);
+            //services.AddQuartzHostedService(q => q.WaitForJobsToComplete = true);
+
+            //// Add IDatabase service
+            //services.AddSingleton(sp =>
+            //{
+            //    var connectionMultiplexer = ConnectionMultiplexer.Connect(configuration["Redis:ConnectionString"]);
+            //    return connectionMultiplexer.GetDatabase();
+            //});
 
             switch (cacheSettings.CacheType)
             {
                 case string type when type.Equals("redis", StringComparison.OrdinalIgnoreCase):
 
                     services.AddSingleton<IConnectionMultiplexer>(sp => ConnectionMultiplexer.Connect(cacheSettings.Redis!.Configuration!));
+
+                    // Register the IDatabase from the connection multiplexer
+                    services.AddScoped(sp =>
+                    {
+                        var connectionMultiplexer = sp.GetRequiredService<IConnectionMultiplexer>();
+                        return connectionMultiplexer.GetDatabase();
+                    });
 
                     services.AddStackExchangeRedisCache(options =>
                     {
@@ -163,11 +172,22 @@ public static class DependencyInjection
                     break;
             }
 
+            services.AddScoped<IServiceManager, ServiceManager>();
+            services.AddScoped<IAccountService, AccountService>();
+            services.AddScoped<ILogService, LogService>();
+            services.AddScoped<IDHTService, DHTService>();
+            services.AddScoped<IDHTRedisService, DHTRedisService>();
+            services.AddScoped<IHashingService, HashingService>();
+            services.AddScoped<INodeManagementService, NodeManagementService>();
+            //services.AddScoped<INodeHealthCheckService, NodeHealthCheckService>();
+
             services.AddScoped<IUnitOfWork, UnitOfWork>();
             services.AddTransient(typeof(IBaseRepository<>), typeof(BaseRepository<>));
 
             services.AddScoped<IAccountRepository, AccountRepository>();
             services.AddScoped<ILogRepository, LogRepository>();
+
+
 
             return services;
         }

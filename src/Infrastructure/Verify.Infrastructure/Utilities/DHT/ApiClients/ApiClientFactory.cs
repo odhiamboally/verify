@@ -30,7 +30,7 @@ internal sealed class ApiClientFactory : IApiClientFactory
             var httpClient = new HttpClient
             {
                 BaseAddress = new Uri(nodeBaseUrl),
-                Timeout = TimeSpan.FromSeconds(100)  // You can adjust the timeout as necessary
+                Timeout = TimeSpan.FromSeconds(500)  // You can adjust the timeout as necessary
             };
 
             // Create and return a Refit client dynamically

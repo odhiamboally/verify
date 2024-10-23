@@ -16,6 +16,7 @@ public interface IServiceManager
     IDHTService DHTService { get; }
     IDHTRedisService DHTRedisService { get; }
     IHashingService HashingService { get; }
+    INodeManagementService NodeManagementService { get; }
     //INodeHealthCheckService NodeHealthCheckService { get; }
 
 

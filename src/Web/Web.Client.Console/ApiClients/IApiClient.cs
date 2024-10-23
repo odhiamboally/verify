@@ -9,5 +9,5 @@ using Web.Client.Console.Dtos;
 namespace Web.Client.Console.ApiClients;
 public interface IApiClient
 {
-    Task<AccountResponse> FetchAccountData(AccountRequest request);
+    Task<AccountInfo> FetchAccountData(AccountRequest request);
 }
