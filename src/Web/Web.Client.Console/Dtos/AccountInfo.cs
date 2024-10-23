@@ -5,11 +5,10 @@ using System.Text;
 using System.Threading.Tasks;
 
 namespace Web.Client.Console.Dtos;
-public record AccountResponse
+public record AccountInfo
 {
-    public string? FirstName { get; init; }
-    public string? LastName { get; init; }
-    public string? OtherNames { get; init; }
+    public byte[]? AccountHash { get; init; }
+    public string? AccountName { get; init; }
     public string? AccountNumber { get; init; }
-
+    public string? AccountBIC { get; init; }
 }

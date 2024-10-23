@@ -10,6 +10,8 @@ using System.Threading.Tasks;
 
 using Newtonsoft.Json;
 
+using Refit;
+
 using StackExchange.Redis;
 
 using Verify.Application.Abstractions.DHT;
@@ -61,11 +63,12 @@ internal sealed class DHTService : IDHTService
 
             var bicHashResponse = await hashingService.ByteHash(accountRequest.InitiatorBIC);
             var bicHash = bicHashResponse.Data ?? Array.Empty<byte>();
-            var nodeExistsInDHTResponse = await dHTRedisService.NodeExistsAsync("dht:nodes", bicHash);
+            //var nodeExistsInDHTResponse = await dHTRedisService.NodeExistsAsync("dht:nodes", bicHash);
+            var nodeExistsInDHTResponse = await dHTRedisService.SortedSetNodeExistsAsync("dht:nodes", bicHash);
             if (!nodeExistsInDHTResponse.Data)
             {
                 // Node does not exist in the DHT; add it
-                var nodeEndpointResponse = await nodeManagementService.GetNodeEndpointFromConfigAsync(bicHash);
+                var nodeEndpointResponse = await nodeManagementService.GetNodeEndpointFromConfigAsync(accountRequest.InitiatorBIC);
                 if (!nodeEndpointResponse.Successful)
                 {
                     //ToDo: Decide how to handle this case; here we return a failure response
@@ -99,8 +102,9 @@ internal sealed class DHTService : IDHTService
             }
 
             var responsibleNode = responsibleNodeResponse.Data;
-            var nodeEndPoint = await nodeManagementService.GetNodeEndpointAsync(accountHash.Data!);
-            var accountDataResponse = await QueryBankAsync(nodeEndPoint.Data!, accountRequest);
+
+            var bankBaseUrl = $"{responsibleNode!.NodeUri.Scheme}://{responsibleNode.NodeUri.Host}:{responsibleNode.NodeUri.Port}/";
+            var accountDataResponse = await QueryBankAsync(bankBaseUrl, accountRequest);
             if (!accountDataResponse.Successful)
             {
                 return DHTResponse<AccountInfo>.Failure("Failed to retrieve account details from the responsible node.");
@@ -108,7 +112,7 @@ internal sealed class DHTService : IDHTService
 
             var accountData = accountDataResponse.Data;
             var storeDataResponse = await StoreAccountDataAsync(accountData!);
-            await dHTRedisService.SetNodeAsync("dht:account", accountHash.Data!, JsonConvert.SerializeObject(accountData), TimeSpan.FromHours(24));
+            //await dHTRedisService.SetNodeAsync("dht:account", accountHash.Data!, JsonConvert.SerializeObject(accountData), TimeSpan.FromHours(24));
 
             return DHTResponse<AccountInfo>.Success("Account data fetched successfully.", accountData!);
         }
@@ -144,7 +148,8 @@ internal sealed class DHTService : IDHTService
     {
         try
         {
-            return await GetClosestNode(bicHash);
+            //return await GetClosestNode(bicHash);
+            return await dHTRedisService.GetSortedSetClosestNodeAsync(bicHash);
         }
         catch (Exception)
         {
@@ -168,18 +173,6 @@ internal sealed class DHTService : IDHTService
 
             NodeInfo? closestNode = null;
             long closestDistance = long.MaxValue;
-
-            //foreach (var node in allNodes.Data!)
-            //{
-            //    var distance = DHTUtilities.CalculateXorDistance(bicHash, node!.NodeHash);
-
-            //    // Find the closest node based on the XOR distance
-            //    if (distance < closestDistance)
-            //    {
-            //        closestDistance = distance;
-            //        closestNode = node;
-            //    }
-            //}
 
             Parallel.ForEach(allNodes.Data!, node =>
             {
@@ -260,18 +253,41 @@ internal sealed class DHTService : IDHTService
     {
         try
         {
+            if (string.IsNullOrWhiteSpace(bankBaseUrl))
+            {
+                return DHTResponse<AccountInfo>.Failure("Bank base URL is invalid.");
+            }
+
             // Create a Refit client for the specified bank
             var bankApiClient = apiClientFactory.CreateClient(bankBaseUrl);
+            var accountDetailsResponse = await bankApiClient.FetchAccountData(accountRequest);
 
-            // Send request to the specified bank and return the result
-            var accountDetails = await bankApiClient.FetchAccountData(accountRequest);
+            AccountInfo accountInfo = new()
+            {
+                AccountHash = Array.Empty<byte>(),
+                AccountBIC = accountRequest.RecipientBIC,
+                AccountName = $"{accountDetailsResponse.FirstName} {accountDetailsResponse.LastName}",
+                AccountNumber = accountDetailsResponse.AccountNumber
+            };
 
-            return accountDetails;
+            return accountDetailsResponse != null
+                ? DHTResponse<AccountInfo>.Success("Account data retrieved successfully", accountInfo)
+                : DHTResponse<AccountInfo>.Failure("Account data could not be retrieved.");
         }
-        catch (Exception)
+        catch (ApiException apiEx)
         {
-
-            throw;
+            // Capture specific HTTP errors
+            return DHTResponse<AccountInfo>.Failure($"API error occurred: {apiEx.StatusCode}, Message: {apiEx.Content}");
+        }
+        catch (HttpRequestException httpEx)
+        {
+            // Handle network issues (e.g., connection failure, timeouts)
+            return DHTResponse<AccountInfo>.Failure($"Network error occurred: {httpEx.Message}");
+        }
+        catch (Exception ex)
+        {
+            // Catch other exceptions
+            return DHTResponse<AccountInfo>.Failure($"An error occurred: {ex.Message}");
         }
     }
 
