@@ -27,9 +27,8 @@ internal sealed class DHTService : IDHTService
     private readonly HttpClient httpClient;
     private readonly IApiClientFactory apiClientFactory;
     private readonly IHashingService hashingService;
-    private readonly IReplicationService replicationService;
     private readonly INodeManagementService nodeManagementService;
-    private readonly IDatabase redisDatabase;
+    //private readonly IDatabase redisDatabase;
     private readonly IDHTRedisService dHTRedisService;
 
 
@@ -37,56 +36,81 @@ internal sealed class DHTService : IDHTService
         IHttpClientFactory httpClientFactory, 
         IApiClientFactory ApiClientFactory, 
         IHashingService HashingService,
-        IReplicationService ReplicationService,
         INodeManagementService NodeManagementService,
-        IDatabase RedisDatabase,
+        /*IDatabase RedisDatabase,*/
         IDHTRedisService DHTRedisService)
     {
         httpClient = httpClientFactory.CreateClient();
         httpClient.Timeout = TimeSpan.FromSeconds(100);
         apiClientFactory = ApiClientFactory;
         hashingService = HashingService;
-        replicationService = ReplicationService;
         nodeManagementService = NodeManagementService;
-        redisDatabase = RedisDatabase;
+        //redisDatabase = RedisDatabase;
         dHTRedisService = DHTRedisService;
 
     }
 
 
-    public async Task<DHTResponse<AccountResponse>> FetchAccountData(AccountRequest accountRequest)
+    public async Task<DHTResponse<AccountInfo>> FetchAccountData(AccountRequest accountRequest)
     {
         try
         {
             var accountResponse = await LookupAccountInMemoryAsync(accountRequest);
             if (accountResponse.Successful)
-            {
                 return accountResponse;
+
+            var bicHashResponse = await hashingService.ByteHash(accountRequest.InitiatorBIC);
+            var bicHash = bicHashResponse.Data ?? Array.Empty<byte>();
+            var nodeExistsInDHTResponse = await dHTRedisService.NodeExistsAsync("dht:nodes", bicHash);
+            if (!nodeExistsInDHTResponse.Data)
+            {
+                // Node does not exist in the DHT; add it
+                var nodeEndpointResponse = await nodeManagementService.GetNodeEndpointFromConfigAsync(bicHash);
+                if (!nodeEndpointResponse.Successful)
+                {
+                    //ToDo: Decide how to handle this case; here we return a failure response
+                    return DHTResponse<AccountInfo>.Failure("Failed to retrieve node endpoint from config.");
+                }
+
+                NodeInfo nodeToAdd = new()
+                {
+                    NodeBIC = accountRequest.InitiatorBIC,
+                    NodeHash = bicHash,
+                    NodeEndPoint = nodeEndpointResponse.Data,
+                    NodeUri = new Uri(nodeEndpointResponse.Data!),
+                    LastSeen = DateTimeOffset.UtcNow
+                };
+
+                var addNodeResponse = await nodeManagementService.AddOrUpdateNodeAsync(nodeToAdd, true);
+                if (!addNodeResponse.Successful)
+                {
+                    //ToDo: Decide how to handle this case; here we return a failure response
+                    return DHTResponse<AccountInfo>.Failure("Failed to add or update the node in the DHT.");
+                }
             }
 
-            // Route the request using Kademlia's routing algorithm to find the responsible node
+            // Route the request using Kademlia’s routing algorithm to find the responsible node
             var accountHash = await hashingService.ByteHash(accountRequest.RecipientAccountNumber);
-            var responsibleNodeResponse = await FindResponsibleNodeAsync(accountHash.Data!);
+
+            var responsibleNodeResponse = await FindClosestResponsibleNodeAsync(bicHash);
             if (!responsibleNodeResponse.Successful)
             {
-                return DHTResponse<AccountResponse>.Failure(responsibleNodeResponse.Message!);
+                return DHTResponse<AccountInfo>.Failure(responsibleNodeResponse.Message!);
             }
 
             var responsibleNode = responsibleNodeResponse.Data;
-
             var nodeEndPoint = await nodeManagementService.GetNodeEndpointAsync(accountHash.Data!);
             var accountDataResponse = await QueryBankAsync(nodeEndPoint.Data!, accountRequest);
             if (!accountDataResponse.Successful)
             {
-                return DHTResponse<AccountResponse>.Failure("Failed to retrieve account details from the responsible node.");
+                return DHTResponse<AccountInfo>.Failure("Failed to retrieve account details from the responsible node.");
             }
 
             var accountData = accountDataResponse.Data;
+            var storeDataResponse = await StoreAccountDataAsync(accountData!);
+            await dHTRedisService.SetNodeAsync("dht:account", accountHash.Data!, JsonConvert.SerializeObject(accountData), TimeSpan.FromHours(24));
 
-            // Cache the result in Redis
-            await redisDatabase.StringSetAsync(accountHash.Data, JsonConvert.SerializeObject(accountData));
-
-            return DHTResponse<AccountResponse>.Success("Account data fetched successfully.", accountData!);
+            return DHTResponse<AccountInfo>.Success("Account data fetched successfully.", accountData!);
         }
         catch (Exception)
         {
@@ -94,75 +118,20 @@ internal sealed class DHTService : IDHTService
         }
     }
 
-    public async Task<DHTResponse<AccountResponse>> StoreAccountDataAsync(StoreAccountDataRequest storeAccountDataRequest)
-    {
-        try
-        {
-            var accountHashResponse = await hashingService.ByteHash(storeAccountDataRequest.AccountNumber);
-
-            // Store the data in the current node - ToDO: Implement this
-
-
-
-            // Store data in Redis
-            await redisDatabase.StringSetAsync(accountHashResponse.Data, JsonConvert.SerializeObject(storeAccountDataRequest));
-
-            // Replicate data to neighboring nodes (implement using DHT logic)
-            ReplicateAccountDataRequest replicateAccountDataRequest = new()
-            {
-                AccountHash = accountHashResponse.Data?? Array.Empty<byte>(),
-                NodeUri = new Uri("") // ToDo: Get the right value
-
-            };
-
-            var replicationResult = await replicationService.ReplicateAccountDataAsync(replicateAccountDataRequest);
-
-            if (!replicationResult.Data)
-            {
-                return DHTResponse<AccountResponse>.Failure(
-                    "Error: Problem Storing Account Data",
-                    new AccountResponse
-                    {
-                        AccountHash = storeAccountDataRequest.AccountHash,
-                        AccountBIC = storeAccountDataRequest.BankBIC,
-                        AccountNumber = storeAccountDataRequest.AccountNumber,
-                        AccountName = storeAccountDataRequest.AccountName,
-                    }!
-                );
-            }
-
-            return DHTResponse<AccountResponse>.Success(
-                "Account data stored successfully.",
-                new AccountResponse 
-                {
-                    AccountHash = storeAccountDataRequest.AccountHash,
-                    AccountBIC = storeAccountDataRequest.BankBIC,
-                    AccountNumber = storeAccountDataRequest.AccountNumber,
-                    AccountName = storeAccountDataRequest.AccountName,
-                }!
-            );
-
-        }
-        catch (Exception)
-        {
-
-            throw;
-        }
-    }
-
-    public async Task<DHTResponse<AccountResponse>> LookupAccountInMemoryAsync(AccountRequest accountRequest)
+    public async Task<DHTResponse<AccountInfo>> LookupAccountInMemoryAsync(AccountRequest accountRequest)
     {
         try
         {
             var accountHash = await hashingService.ByteHash(accountRequest.RecipientAccountNumber);
-            var accountDataJson = await redisDatabase.StringGetAsync(accountHash.Data).ConfigureAwait(false);
-            if (!accountDataJson.HasValue)
+
+            // ToDo: Use correct method
+            var accountDataResponse = await dHTRedisService.GetAccountNodeAsync("dht:account", accountHash.Data!);
+            if (accountDataResponse.Data == null)
             {
-                return DHTResponse<AccountResponse>.Failure("Account not found.");
+                return DHTResponse<AccountInfo>.Failure("Account not found.");
             }
 
-            var accountResponse = JsonConvert.DeserializeObject<AccountResponse>(accountDataJson!);
-            return DHTResponse<AccountResponse>.Success("Account found", accountResponse!);
+            return DHTResponse<AccountInfo>.Success("Account found", accountDataResponse.Data!);
         }
         catch (Exception)
         {
@@ -171,57 +140,11 @@ internal sealed class DHTService : IDHTService
         }
     }
 
-    public async Task<DHTResponse<NodeInfo>> FindResponsibleNodeAsync(byte[] accountHash)
+    public async Task<DHTResponse<NodeInfo>> FindClosestResponsibleNodeAsync(byte[] bicHash)
     {
         try
         {
-            // Start with the current node’s routing table
-            var closestNodeResponse = await GetClosestNode(accountHash);
-            if (closestNodeResponse.Data == null)
-            {
-                return DHTResponse<NodeInfo>.Failure("No closest node found.");
-            }
-
-            var closestNode = closestNodeResponse.Data;
-
-            var nodeHasDataForKeyResult = await NodeHasDataForKeyAsync(closestNode, accountHash);
-            if (nodeHasDataForKeyResult.Data)
-            {
-                return DHTResponse<NodeInfo>.Success("Node found and responsible for accountHash", closestNode);
-            }
-
-            // Loop through known nodes to find the closest responsible node
-            while (true)
-            {
-                // Calculate the distance for the closest node
-                long currentDistance = DHTUtilities.CalculateXorDistance(accountHash, closestNode.NodeHash);
-                var nextClosestNodeResponse = await FindNextClosestNodeAsync(accountHash, currentDistance);
-
-                // If the next closest node is the same as the current one, we've found the best match
-                if (nextClosestNodeResponse.Data == null || nextClosestNodeResponse.Data.Equals(closestNode))
-                {
-                    return DHTResponse<NodeInfo>.Success("No closer node found", closestNode);
-                }
-
-                //closestNode = nextClosestNodeResponse.Data;
-                closestNode = new NodeInfo
-                {
-                    NodeBIC = nextClosestNodeResponse.Data!.NodeBIC,
-                    NodeHash = nextClosestNodeResponse.Data?.NodeHash ?? Array.Empty<byte>(),
-                    NodeEndPoint = nextClosestNodeResponse.Data?.NodeEndPoint,
-                    NodeUri = nextClosestNodeResponse.Data?.NodeUri ?? new Uri(string.Empty),
-                    KnownPeers = nextClosestNodeResponse.Data?.KnownPeers,
-                    LastSeen = DateTimeOffset.UtcNow,
-                };
-
-                // Check if this new closest node is responsible
-                nodeHasDataForKeyResult = await NodeHasDataForKeyAsync(closestNode, accountHash);
-                if (nodeHasDataForKeyResult.Data)
-                {
-                    return DHTResponse<NodeInfo>.Success("Node found and responsible for accountHash", closestNode);
-                }
-
-            }
+            return await GetClosestNode(bicHash);
         }
         catch (Exception)
         {
@@ -230,103 +153,53 @@ internal sealed class DHTService : IDHTService
         }
     }
 
-    public async Task<DHTResponse<NodeInfo>> GetClosestNode(byte[] accountHash)
+    public async Task<DHTResponse<NodeInfo>> GetClosestNode(byte[] bicHash)
     {
         try
         {
-            // Fetch all nodes from Redis (or only relevant ones based on some criteria)
-            //var nodeKeys = await redisDatabase.HashKeysAsync("dht:nodes"); 
-            var nodes = await dHTRedisService.GetAllNodesAsync(); 
+            var allNodes = await dHTRedisService.GetAllNodesAsync("dht:nodes");
+
+            // Filter nodes to only include those with the same bicHash
+            var relevantNodes = allNodes.Data?.Where(node => node.NodeHash.SequenceEqual(bicHash)).ToList();
+            if (relevantNodes == null || !relevantNodes.Any())
+            {
+                return DHTResponse<NodeInfo>.Failure("No nodes found for the given BIC hash.");
+            }
 
             NodeInfo? closestNode = null;
             long closestDistance = long.MaxValue;
 
-            foreach (var node in nodes.Data!)
+            //foreach (var node in allNodes.Data!)
+            //{
+            //    var distance = DHTUtilities.CalculateXorDistance(bicHash, node!.NodeHash);
+
+            //    // Find the closest node based on the XOR distance
+            //    if (distance < closestDistance)
+            //    {
+            //        closestDistance = distance;
+            //        closestNode = node;
+            //    }
+            //}
+
+            Parallel.ForEach(allNodes.Data!, node =>
             {
-                //var serializedNode = await redisDatabase.HashGetAsync("dht:nodes", nodeKey);
-                //if (serializedNode.IsNullOrEmpty)
-                //{
-                //    continue; 
-                //}
+                var distance = DHTUtilities.CalculateXorDistance(bicHash, node!.NodeHash);
 
-                //var node = JsonConvert.DeserializeObject<NodeInfo>(serializedNode!);
-                var distance = DHTUtilities.CalculateXorDistance(accountHash, node!.NodeHash);
-
-                // Find the closest node based on the XOR distance
-                if (distance < closestDistance)
+                // Use Interlocked.CompareExchange for thread-safe closest node update
+                if (distance < Interlocked.CompareExchange(ref closestDistance, distance, closestDistance))
                 {
-                    closestDistance = distance;
                     closestNode = node;
                 }
-            }
+            });
 
-            if (closestNode != null)
-            {
-                return DHTResponse<NodeInfo>.Success("Success", closestNode);
-            }
-
-            return DHTResponse<NodeInfo>.Failure("No nodes found in the DHT.");
-        }
-        catch (Exception)
-        {
-
-            throw;
-        }
-    }
-
-    public async Task<DHTResponse<NodeInfo>> FindNextClosestNodeAsync(byte[] accountHash, long currentDistance)
-    {
-        try
-        {
-            var nodeKeys = await redisDatabase.HashKeysAsync("dht:nodes");
-
-            NodeInfo? nextClosestNode = null;
-            long nextClosestDistance = long.MaxValue;
-
-            // Step 2: Iterate over the nodes and calculate XOR distance
-            foreach (var nodeKey in nodeKeys)
-            {
-                var serializedNode = await redisDatabase.HashGetAsync("dht:nodes", nodeKey);
-                if (serializedNode.IsNullOrEmpty)
-                {
-                    continue;
-                }
-
-                var node = JsonConvert.DeserializeObject<NodeInfo>(serializedNode!);
-                var distance = DHTUtilities.CalculateXorDistance(accountHash, node!.NodeHash);
-                if (distance < nextClosestDistance && distance > currentDistance)
-                {
-                    nextClosestDistance = distance;
-                    nextClosestNode = node;
-                }
-            }
-
-            if (nextClosestNode != null)
-            {
-                return DHTResponse<NodeInfo>.Success("Next closest node found", nextClosestNode);
-            }
-
-            return DHTResponse<NodeInfo>.Failure("No next closest node found.");
+            return closestNode != null
+                ? DHTResponse<NodeInfo>.Success("Success", closestNode)
+                : DHTResponse<NodeInfo>.Failure("No nodes found in the DHT.", null);
 
         }
         catch (Exception)
         {
 
-            throw;
-        }
-    }
-
-    public async Task<DHTResponse<bool>> NodeHasDataForKeyAsync(NodeInfo closestNode, byte[] accountHash)
-    {
-        try
-        {
-            // Check if the node has the data by checking Redis
-            var nodeKey = $"node:{closestNode.NodeHash}";
-            var hasData = await redisDatabase.HashExistsAsync(nodeKey, accountHash);
-            return DHTResponse<bool>.Success("Check completed", hasData);
-        }
-        catch (Exception)
-        {
             throw;
         }
     }
@@ -336,18 +209,17 @@ internal sealed class DHTService : IDHTService
         try
         {
             // Retrieve all nodes from Redis (local node's routing table)
-            var allNodes = await redisDatabase.HashGetAllAsync("dht:nodes");
-
-            if (allNodes.Length == 0)
+            var allNodesResponse = await dHTRedisService.GetAllNodesAsync("dht:nodes");
+            if (!allNodesResponse.Data!.Any())
             {
                 return new List<NodeInfo>();
             }
 
             // Calculate XOR distance for each node and sort by closest
-            var closestNodes = allNodes
+            var closestNodes = allNodesResponse.Data!
                 .Select(nodeEntry =>
                 {
-                    var nodeInfo = JsonConvert.DeserializeObject<NodeInfo>(nodeEntry.Value!);
+                    var nodeInfo = nodeEntry;
                     var distance = DHTUtilities.CalculateXorDistance(accountHash, nodeInfo!.NodeHash);
                     return (Node: nodeInfo, Distance: distance);
                 })
@@ -356,14 +228,27 @@ internal sealed class DHTService : IDHTService
                 .Select(pair => pair.Node)
                 .ToList();
 
-            return closestNodes;
+            return closestNodes!;
         }
         catch (Exception)
         {
 
             throw;
         }
-        
+
+    }
+
+    public async Task<DHTResponse<bool>> NodeHasDataForKeyAsync(NodeInfo closestNode, byte[] nodeHash)
+    {
+        try
+        {
+            var hasData = await dHTRedisService.NodeExistsAsync("dht:nodes", nodeHash);
+            return DHTResponse<bool>.Success("Check completed", hasData.Data);
+        }
+        catch (Exception)
+        {
+            throw;
+        }
     }
 
     public Task<DHTResponse<bool>> HasNextHop(NodeInfo currentNode, string targetHash)
@@ -371,7 +256,7 @@ internal sealed class DHTService : IDHTService
         throw new NotImplementedException();
     }
 
-    public async Task<DHTResponse<AccountResponse>> QueryBankAsync(string bankBaseUrl, AccountRequest accountRequest)
+    public async Task<DHTResponse<AccountInfo>> QueryBankAsync(string bankBaseUrl, AccountRequest accountRequest)
     {
         try
         {
@@ -390,6 +275,52 @@ internal sealed class DHTService : IDHTService
         }
     }
 
+    public async Task<DHTResponse<AccountInfo>> StoreAccountDataAsync(AccountInfo accountInfo)
+    {
+        try
+        {
+            var accountHashResponse = await hashingService.ByteHash(accountInfo.AccountNumber!);
+            await dHTRedisService.SetNodeAsync("dht:account", accountHashResponse.Data!, JsonConvert.SerializeObject(accountInfo), TimeSpan.FromHours(24));
+
+            return DHTResponse<AccountInfo>.Success(
+                "Account data stored successfully.",
+                new AccountInfo
+                {
+                    AccountHash = accountInfo.AccountHash,
+                    AccountBIC = accountInfo.AccountBIC,
+                    AccountNumber = accountInfo.AccountNumber,
+                    AccountName = accountInfo.AccountName,
+                }!
+            );
+
+        }
+        catch (Exception)
+        {
+
+            throw;
+        }
+    }
+
+    public async Task<DHTResponse<bool>> AddNodeToPeers(NodeInfo nodeInfo, byte[] accountHash)
+    {
+        try
+        {
+            var closestNodes = await GetKClosestNodesAsync(accountHash);
+            foreach (var node in closestNodes)
+            {
+                if (!nodeInfo.KnownPeers!.Contains(node))
+                {
+                    nodeInfo.KnownPeers.Add(node);
+                }
+            }
+            return DHTResponse<bool>.Success("Node Added to Peers", true);
+        }
+        catch (Exception)
+        {
+
+            throw;
+        }
+    }
 
 
 }

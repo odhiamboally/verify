@@ -9,4 +9,5 @@ public record ReplicateAccountDataRequest
 {
     public required byte[] AccountHash { get; init; }
     public required Uri NodeUri { get; init; }
+    public required StoreAccountDataRequest AccountData { get; init; }
 }

@@ -5,7 +5,7 @@ using System.Text;
 using System.Threading.Tasks;
 
 namespace Verify.Application.Dtos.Account;
-public record AccountResponse
+public record AccountInfo
 {
     public byte[]? AccountHash { get; init; }
     public string? AccountName { get; init; }

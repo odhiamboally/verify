@@ -25,7 +25,7 @@ public class DHTController : ControllerBase
     }
 
     [HttpGet("fetchaccountdata")]
-    public async Task<ActionResult<DHTResponse<AccountResponse>>> FetchAccountData([FromBody] AccountRequest fetchAccountRequest)
+    public async Task<ActionResult<DHTResponse<AccountInfo>>> FetchAccountData([FromBody] AccountRequest fetchAccountRequest)
     {
         var validator = new AccountRequestValidator();
         if (!validator.Validate(fetchAccountRequest).IsValid)

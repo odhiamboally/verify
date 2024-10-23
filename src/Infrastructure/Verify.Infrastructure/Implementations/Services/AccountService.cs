@@ -17,32 +17,32 @@ internal sealed class AccountService : IAccountService
         
     }
 
-    public Task<Response<AccountResponse>> CreateAsync(StoreAccountDataRequest request)
+    public Task<Response<AccountInfo>> CreateAsync(StoreAccountDataRequest request)
     {
         throw new NotImplementedException();
     }
 
-    public Task<Response<AccountResponse>> DeleteAsync(int Id)
+    public Task<Response<AccountInfo>> DeleteAsync(int Id)
     {
         throw new NotImplementedException();
     }
 
-    public Task<Response<List<AccountResponse>>> FindAllAsync(PaginationSetting paginationSetting)
+    public Task<Response<List<AccountInfo>>> FindAllAsync(PaginationSetting paginationSetting)
     {
         throw new NotImplementedException();
     }
 
-    public Task<Response<AccountResponse>> FindByIdAsync(int Id)
+    public Task<Response<AccountInfo>> FindByIdAsync(int Id)
     {
         throw new NotImplementedException();
     }
 
-    public Task<Response<List<AccountResponse>>> SearchAsync(SearchRequest searchRequest)
+    public Task<Response<List<AccountInfo>>> SearchAsync(SearchRequest searchRequest)
     {
         throw new NotImplementedException();
     }
 
-    public Task<Response<AccountResponse>> UpdateAsync(UpdateAccountRequest request, bool dBWins)
+    public Task<Response<AccountInfo>> UpdateAsync(UpdateAccountRequest request, bool dBWins)
     {
         throw new NotImplementedException();
     }
