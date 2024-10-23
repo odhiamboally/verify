@@ -12,7 +12,7 @@ namespace Verify.Infrastructure.Utilities.DHT.ApiClients;
 internal interface IApiClient
 {
     [Post("/fetchaccountdata")]
-    Task<DHTResponse<AccountResponse>> FetchAccountData([Body] AccountRequest fetchAccountRequest);
+    Task<DHTResponse<AccountInfo>> FetchAccountData([Body] AccountRequest fetchAccountRequest);
 
 
 

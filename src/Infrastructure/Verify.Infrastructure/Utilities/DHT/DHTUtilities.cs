@@ -29,13 +29,8 @@ public static class DHTUtilities
 
     public static int CalculateXorDistance(byte[] param1, byte[] param2)
     {
-        byte[] xorResult = new byte[param1.Length];
-        for (int i = 0; i < param1.Length; i++)
-        {
-            xorResult[i] = (byte)(param1[i] ^ param2[i]);
-        }
+        var xorResult = param1.Zip(param2, (b1, b2) => (byte)(b1 ^ b2)).ToArray();
 
-        // Find the leading bit where the IDs differ
         for (int i = 0; i < xorResult.Length; i++)
         {
             if (xorResult[i] != 0)
@@ -43,9 +38,28 @@ public static class DHTUtilities
                 return (i * 8) + (int)Math.Log2(xorResult[i]);
             }
         }
-
         return 0; // They are identical
     }
+
+    //public static int CalculateXorDistance(byte[] param1, byte[] param2)
+    //{
+    //    byte[] xorResult = new byte[param1.Length];
+    //    for (int i = 0; i < param1.Length; i++)
+    //    {
+    //        xorResult[i] = (byte)(param1[i] ^ param2[i]);
+    //    }
+
+    //    // Find the leading bit where the IDs differ
+    //    for (int i = 0; i < xorResult.Length; i++)
+    //    {
+    //        if (xorResult[i] != 0)
+    //        {
+    //            return (i * 8) + (int)Math.Log2(xorResult[i]);
+    //        }
+    //    }
+
+    //    return 0; // They are identical
+    //}
 
     //public static BigInteger CalculateXorDistance(byte[] hash1, byte[] hash2)
     //{

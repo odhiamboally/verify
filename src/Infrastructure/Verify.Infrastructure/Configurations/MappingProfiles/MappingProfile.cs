@@ -18,7 +18,7 @@ public class MappingProfile : Profile
     {
         #region ClassStream
 
-        CreateMap<Account, AccountResponse>().ReverseMap();
+        CreateMap<Account, AccountInfo>().ReverseMap();
         CreateMap<Account, StoreAccountDataRequest>().ReverseMap();
         CreateMap<Account, UpdateAccountRequest>().ReverseMap();
 

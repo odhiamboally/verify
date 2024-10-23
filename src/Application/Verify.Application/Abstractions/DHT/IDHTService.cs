@@ -13,14 +13,14 @@ namespace Verify.Application.Abstractions.DHT;
 public interface IDHTService
 {
     
-    Task<DHTResponse<AccountResponse>> StoreAccountDataAsync(StoreAccountDataRequest storeAccountDataRequest);
-    Task<DHTResponse<AccountResponse>> LookupAccountInMemoryAsync(AccountRequest accountRequest);
-    Task<DHTResponse<NodeInfo>> FindResponsibleNodeAsync(byte[] nodeHash);
+    Task<DHTResponse<bool>> AddNodeToPeers(NodeInfo nodeInfo, byte[] accountHash);
+    Task<DHTResponse<AccountInfo>> StoreAccountDataAsync(AccountInfo accountInfo);
+    Task<DHTResponse<AccountInfo>> LookupAccountInMemoryAsync(AccountRequest accountRequest);
+    Task<DHTResponse<NodeInfo>> FindClosestResponsibleNodeAsync(byte[] bicHash);
     Task<DHTResponse<NodeInfo>> GetClosestNode(byte[] accountHash);
-    Task<DHTResponse<NodeInfo>> FindNextClosestNodeAsync(byte[] accountHash, long currentDistance);
     Task<DHTResponse<bool>> NodeHasDataForKeyAsync(NodeInfo nodeInfo, byte[] accountHash);
     Task<DHTResponse<bool>> HasNextHop(NodeInfo currentNode, string targetHash);
-    Task<DHTResponse<AccountResponse>> FetchAccountData(AccountRequest accountRequest);
-    Task<DHTResponse<AccountResponse>> QueryBankAsync(string nodeBaseUrl, AccountRequest accountRequest);
+    Task<DHTResponse<AccountInfo>> FetchAccountData(AccountRequest accountRequest);
+    Task<DHTResponse<AccountInfo>> QueryBankAsync(string nodeBaseUrl, AccountRequest accountRequest);
 
 }

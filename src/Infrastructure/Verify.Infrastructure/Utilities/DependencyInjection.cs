@@ -57,8 +57,7 @@ public static class DependencyInjection
             services.AddScoped<ILogService, LogService>();
             services.AddScoped<IDHTService, DHTService>();
             services.AddScoped<IHashingService, HashingService>();
-            services.AddScoped<IReplicationService, ReplicationService>();
-            services.AddScoped<INodeHealthCheckService, NodeHealthCheckService>();
+            //services.AddScoped<INodeHealthCheckService, NodeHealthCheckService>();
 
             var refitSettings = new RefitSettings(); // Customize if needed
             services.AddSingleton<IApiClientFactory>(new ApiClientFactory(refitSettings));
@@ -114,7 +113,6 @@ public static class DependencyInjection
                 //q.UseMicrosoftDependencyInjectionJobFactory();
 
                 var jobKey = new JobKey("NodeHealthCheckService");
-                q.AddJob<NodeHealthCheckService>(opts => opts.WithIdentity(jobKey));
 
                 q.AddTrigger(opts => opts
                     .ForJob(jobKey)
