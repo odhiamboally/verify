@@ -116,18 +116,41 @@ internal sealed class NodeManagementService : INodeManagementService
     {
         try
         {
-            // Use the hashed account to retrieve the bank node info from Redis
             var dhtResponse = await dhtRedisService.GetNodeAsync("dht:nodes", accountHash);
+            if (dhtResponse.Successful && dhtResponse.Data != null)
+            {
+                var nodeEndPoint = dhtResponse.Data.NodeEndPoint;
 
-            if (dhtResponse.Successful)
+                if (!string.IsNullOrEmpty(nodeEndPoint))
+                {
+                    return DHTResponse<string>.Success("Node endpoint retrieved successfully", nodeEndPoint);
+                }
+            }
+
+            return DHTResponse<string>.Failure("Node endpoint not found.");
+        }
+        catch (Exception)
+        {
+
+            throw;
+        }
+    }
+
+    public async Task<DHTResponse<string>> GetNodeEndpointFromMemoryAsync(byte[] bicHash)
+    {
+        try
+        {
+            // Use the hashed account to retrieve the bank node info from Redis
+            var dhtResponse = await dhtRedisService.GetNodeAsync("dht:nodes", bicHash);
+            if (dhtResponse.Successful && dhtResponse.Data != null)
             {
                 return DHTResponse<string>.Success(
-                    "",
+                    "Node endpoint retrieved successfully.",
                     dhtResponse.Data!.NodeEndPoint!);
             }
 
-            return DHTResponse<string>.Success(
-                    "",
+            return DHTResponse<string>.Failure(
+                    "Node not found or endpoint is not available.",
                     string.Empty);
         }
         catch (Exception)
@@ -144,6 +167,25 @@ internal sealed class NodeManagementService : INodeManagementService
             var bicHashString = Convert.ToBase64String(bicHash);
             var nodeEnpoint = configuration[$"NodeConfig:{bicHashString}"];
             if (!String.IsNullOrWhiteSpace(nodeEnpoint))
+            {
+                return DHTResponse<string>.Success("Success", nodeEnpoint!);
+            }
+
+            return DHTResponse<string>.Success("Failed", string.Empty);
+        }
+        catch (Exception)
+        {
+
+            throw;
+        }
+    }
+
+    public async Task<DHTResponse<string>> GetNodeEndpointFromConfigAsync(string bankBIC)
+    {
+        try
+        {
+            var nodeEnpoint = configuration[$"NodeConfig:{bankBIC}"];
+            if (!string.IsNullOrWhiteSpace(nodeEnpoint))
             {
                 return DHTResponse<string>.Success("Success", nodeEnpoint!);
             }
@@ -325,7 +367,10 @@ internal sealed class NodeManagementService : INodeManagementService
             {
                 // Node exists, update its info
                 var updatedNode = UpdateNodeInfo(existingNodeResponse.Data!, nodeInfo);
-                await dhtRedisService.SetNodeAsync(redisNodesKey, nodeInfo.NodeHash, JsonConvert.SerializeObject(updatedNode), TimeSpan.FromHours(24));
+                await dhtRedisService.SetSortedNodeAsync(redisBucketsKey, redisNodesKey, updatedNode, distance);
+
+                //await dhtRedisService.SetNodeAsync(redisNodesKey, nodeInfo.NodeHash, JsonConvert.SerializeObject(updatedNode), TimeSpan.FromHours(24));
+
                 return DHTResponse<bool>.Success("Node updated successfully", true, null, new Dictionary<string, object>() { { "node", updatedNode } });
             }
             else

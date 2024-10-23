@@ -17,6 +17,7 @@ internal sealed class ServiceManager : IServiceManager
     public IDHTService DHTService { get; }
     public IDHTRedisService DHTRedisService { get; }
     public IHashingService HashingService { get; }
+    public INodeManagementService NodeManagementService { get; }
     //public INodeHealthCheckService NodeHealthCheckService { get; }
 
 
@@ -28,7 +29,8 @@ internal sealed class ServiceManager : IServiceManager
         ILogService logService, 
         IDHTService dHTService,
         IDHTRedisService dHTRedisService,
-        IHashingService hashingService 
+        IHashingService hashingService,
+        INodeManagementService nodeManagementService 
         /*INodeHealthCheckService nodeHealthCheckService*/)
     {
         AccountService = accountService;
@@ -37,6 +39,7 @@ internal sealed class ServiceManager : IServiceManager
         DHTService = dHTService;
         DHTRedisService = dHTRedisService;
         HashingService = hashingService;
+        NodeManagementService = nodeManagementService;
         //NodeHealthCheckService = nodeHealthCheckService;
     }
 }

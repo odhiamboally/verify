@@ -11,8 +11,8 @@ using Verify.Application.Dtos.Common;
 namespace Verify.Infrastructure.Utilities.DHT.ApiClients;
 internal interface IApiClient
 {
-    [Post("/fetchaccountdata")]
-    Task<DHTResponse<AccountInfo>> FetchAccountData([Body] AccountRequest fetchAccountRequest);
+    [Post("/api/account/fetchaccountinfo")]
+    Task<AccountResponse> FetchAccountData([Body] AccountRequest fetchAccountRequest);
 
 
 

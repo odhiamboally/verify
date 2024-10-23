@@ -15,6 +15,8 @@ namespace Verify.Application.Abstractions.DHT;
 public interface IDHTRedisService
 {
     Task<DHTResponse<bool>> NodeExistsAsync(string key, byte[] hash);
+    Task<DHTResponse<bool>> NodeExistsAsync(string key, string serializedValue);
+    Task<DHTResponse<bool>> SortedSetNodeExistsAsync(string key, byte[] hash);
     Task<DHTResponse<List<NodeInfo>>> GetAllNodesAsync(string key);
     Task<DHTResponse<List<NodeInfo>>> GetNodesByScoreRangeAsync(string key, long minRank, long maxRank); // Retrieve nodes based on score
     Task<DHTResponse<List<NodeInfo>>> GetActiveNodesInBucketAsync(int distance);
@@ -22,6 +24,7 @@ public interface IDHTRedisService
     Task<DHTResponse<NodeInfo>> GetLeastRecentlySeenNodeAsync(string bucketKey, string nodeKey);
     Task<DHTResponse<AccountInfo>> GetAccountNodeAsync(string key, byte[] field);
     Task<DHTResponse<NodeInfo>> GetNodeAsync(string key, byte[] field);
+    Task<DHTResponse<NodeInfo>> GetSortedSetClosestNodeAsync(byte[] bicHash);
     Task<DHTResponse<bool>> SetNodeAsync(string key, byte[] field, string serializedValue, TimeSpan? expiry = null);
 
     // Sorted set to store nodes by distance or other criteria
@@ -30,6 +33,9 @@ public interface IDHTRedisService
     Task<DHTResponse<bool>> RemoveValueAsync(string key, byte[] field);
     Task<DHTResponse<bool>> UpdateUsingTransaction(byte[] bicHash, NodeInfo nodeInfo, TimeSpan? expiry = null);
 
-
     
+
+
+
+
 }
