@@ -52,8 +52,6 @@ public static class DependencyInjection
             var ConnString = configuration.GetConnectionString("KHS");
             services.AddDbContext<DBContext>(options => options.UseSqlServer(ConnString!));
 
-            
-
             var refitSettings = new RefitSettings(); // Customize if needed
             services.AddSingleton<IApiClientFactory>(new ApiClientFactory(refitSettings));
 
@@ -81,16 +79,18 @@ public static class DependencyInjection
 
                 x.UsingRabbitMq((context, cfg) =>
                 {
-                    cfg.Host("localhost", "/", h =>
-                    {
-                        h.Username("guest");
-                        h.Password("guest");
+                    //cfg.Host("host.docker.internal", "/", h =>
+                    //{
+                    //    h.Username("guest");
+                    //    h.Password("guest");
 
-                        h.UseSsl(s =>
-                        {
-                            s.Protocol = SslProtocols.Tls12;
-                        });
-                    });
+                    //    h.UseSsl(s =>
+                    //    {
+                    //        s.Protocol = SslProtocols.Tls12; // Ensure correct SSL protocol
+                    //        s.ServerName = "localhost"; // Match the server name to certificate's CN or subject alternative name
+                    //        s.CertificateValidationCallback = (sender, certificate, chain, sslPolicyErrors) => true; // Use this for dev; otherwise, use proper validation.
+                    //    });
+                    //});
 
                     // Connect the consumer to a receive endpoint
                     cfg.ReceiveEndpoint("my-queue", e =>
