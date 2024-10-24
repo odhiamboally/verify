@@ -1,10 +1,17 @@
 ﻿// See https://aka.ms/new-console-template for more information
+using System.Diagnostics;
+
+using BenchmarkDotNet.Running;
+
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Web.Client.Console.ApiClients;
 using Web.Client.Console.Configurations;
 using Web.Client.Console.Dtos;
+using Web.Client.Console.Utilities;
 
+
+#region Services and DI
 
 var serviceCollection = new ServiceCollection();
 
@@ -18,20 +25,23 @@ var configuration = new ConfigurationBuilder()
 var appSettings = configuration.GetSection("AppSettings").Get<AppSettings>();
 
 serviceCollection.AddHttpClient("DHT", client =>
-    {
-        client.BaseAddress = new Uri(appSettings!.ApiBaseUrl!);
-        client.Timeout = TimeSpan.FromSeconds(appSettings.TimeoutSeconds);
-    });
+{
+    client.BaseAddress = new Uri(appSettings!.ApiBaseUrl!);
+    client.Timeout = TimeSpan.FromSeconds(appSettings.TimeoutSeconds);
+});
 
 serviceCollection.AddSingleton<IConfiguration>(configuration);
 serviceCollection.AddSingleton<IApiClient, ApiClient>();
 
-var serviceProvider =  serviceCollection.BuildServiceProvider();
+var serviceProvider = serviceCollection.BuildServiceProvider();
 
 var config = serviceProvider.GetRequiredService<IConfiguration>();
 var apiClient = serviceProvider.GetRequiredService<IApiClient>();
 
+#endregion
 
+
+#region FetchAccountInfo
 
 AccountRequest accountRequest = new()
 {
@@ -40,12 +50,20 @@ AccountRequest accountRequest = new()
     RecipientAccountNumber = "2456345645"
 };
 
+Stopwatch stopwatch = Stopwatch.StartNew();
 var verifyResponse = await Methods.FetchAccountData(apiClient, accountRequest);
+stopwatch.Stop();
+
 Console.WriteLine($"Account Holder: {verifyResponse.AccountName}");
 Console.WriteLine();
 Console.WriteLine("Account Number: " + verifyResponse.AccountNumber);
 Console.WriteLine();
+Console.WriteLine($"Time taken: {stopwatch.ElapsedMilliseconds} ms");
 Console.ReadKey();
+
+
+#endregion
+
 
 
 
